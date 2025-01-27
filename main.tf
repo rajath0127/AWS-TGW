@@ -232,6 +232,35 @@ output "VPC-02-EC2-01-Public-IP" {
   value = aws_instance.VPC-02-EC2-01.public_ip
 }
 
+resource "aws_ec2_transit_gateway_route_table" "Transit-GW-RT" {
+  transit_gateway_id = aws_ec2_transit_gateway.VPC-Transit-GW.id
+  tags = {
+    Name = "VPC-Transit-GW-RT"
+  }
+}
+
+# Attach VPC 1 to the Transit Gateway
+resource "aws_ec2_transit_gateway_vpc_attachment" "VPC-01-TGA" {
+  transit_gateway_id = aws_ec2_transit_gateway.VPC-Transit-GW.id
+  vpc_id             = aws_vpc.VPC-01.id
+  subnet_ids         = [aws_subnet.VPC-01-Subnet-01.id]
+
+  tags = {
+    Name = "VPC-01-TGA"
+  }
+}
+
+# Attach VPC 2 to the Transit Gateway
+resource "aws_ec2_transit_gateway_vpc_attachment" "VPC-02-TGA" {
+  transit_gateway_id = aws_ec2_transit_gateway.VPC-Transit-GW.id
+  vpc_id             = aws_vpc.VPC-02.id
+  subnet_ids         = [aws_subnet.VPC-02-Subnet-01.id]
+  
+  tags = {
+    Name = "VPC-02-TGA"
+  }
+}
+
 resource "aws_route_table" "VPC-01-Subnet-01-RT" {
   vpc_id = aws_vpc.VPC-01.id
 
@@ -242,7 +271,7 @@ resource "aws_route_table" "VPC-01-Subnet-01-RT" {
 
   route {
     cidr_block = var.vpc_cidr[1]  # Route for VPC-02
-    vpc_peering_connection_id = aws_vpc_peering_connection.VPC-Peering.id
+    transit_gateway_id = aws_ec2_transit_gateway.VPC-Transit-GW.id
   }
 
   tags = {
@@ -260,7 +289,7 @@ resource "aws_route_table" "VPC-02-Subnet-01-RT" {
 
   route {
     cidr_block = var.vpc_cidr[0]  # Route for VPC-01
-    vpc_peering_connection_id = aws_vpc_peering_connection.VPC-Peering.id
+    transit_gateway_id = aws_ec2_transit_gateway.VPC-Transit-GW.id
   }
 
   tags = {
@@ -278,24 +307,30 @@ resource "aws_route_table_association" "VPC-02-Subnet-01-RT" {
   route_table_id = aws_route_table.VPC-02-Subnet-01-RT.id
 }
 
-# VPC Peering Connection
-resource "aws_vpc_peering_connection" "VPC-Peering" {
-  vpc_id        = aws_vpc.VPC-01.id
-  peer_vpc_id   = aws_vpc.VPC-02.id
-  #peer_region   = "us-east-1" # Required if VPCs are in different regions
-  auto_accept   = false       # Set to true if the accepter VPC is in the same AWS account
 
+
+resource "aws_ec2_transit_gateway" "VPC-Transit-GW" {
+  description         = "Transit Gateway Object"
+  amazon_side_asn     = 64512 # ASN for the TGW (default: 64512)
+  auto_accept_shared_attachments = "enable"
+  default_route_table_association = "enable"
+  #default_route_table_propagation = "enable"
   tags = {
-    Name = "VPC-Peering-Connection"
+    Name = "VPC-Transit-GW"
   }
 }
 
-# Accept the Peering Request (Required if auto_accept = false)
-resource "aws_vpc_peering_connection_accepter" "Peer-Accept" {
-  vpc_peering_connection_id = aws_vpc_peering_connection.VPC-Peering.id
-  auto_accept               = true
 
-  tags = {
-    Name = "VPC-Peering-Connection-Accepter"
-  }
+
+# Add routes to the Transit Gateway Route Table
+resource "aws_ec2_transit_gateway_route" "route-to-VPC-01" {
+  destination_cidr_block         = var.vpc_cidr[0]
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.Transit-GW-RT.id
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.VPC-01-TGA.id
+}
+
+resource "aws_ec2_transit_gateway_route" "route-to-VPC-02" {
+  destination_cidr_block         = var.vpc_cidr[1]
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.Transit-GW-RT.id
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.VPC-02-TGA.id
 }
